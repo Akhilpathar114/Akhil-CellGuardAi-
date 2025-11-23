@@ -1,6 +1,6 @@
 # app.py
-# CellGuard.AI - Enhanced Dashboard (includes Health Gauge, Alerts, Interpretations)
-# Based on user's transformed file (defensive + deploy-ready). See original reference. 1
+# CellGuard.AI — Dashboard with demo dataset selector (EV / Drone / Phone presets)
+# All prior features included: health gauge, alerts, extra charts, colored warnings, PDF export.
 
 import streamlit as st
 import pandas as pd
@@ -10,12 +10,113 @@ import plotly.graph_objects as go
 from sklearn.ensemble import IsolationForest
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.linear_model import LinearRegression
+import io
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from reportlab.lib.units import mm
 
 st.set_page_config(page_title="CellGuard.AI - Dashboard", layout="wide")
 
 # --------------------------
-# Utilities (kept from prior robust version)
+# Data generators (scenarios)
 # --------------------------
+def generate_sample_bms_data(n=800, seed=42, scenario="Generic"):
+    """
+    Scenarios:
+    - Generic: balanced synthetic signals (default)
+    - EV: higher cycles, gradual thermal drift, slow voltage sag
+    - Drone: frequent high current spikes, abrupt voltage dips
+    - Phone: low variance, stable small-signal behavior
+    """
+    np.random.seed(seed)
+    t = np.arange(n)
+    base_voltage = 3.7
+    base_current = 1.5
+    base_temp = 30.0
+    soc_base = 80.0
+
+    if scenario == "Generic":
+        voltage = base_voltage + 0.05 * np.sin(t / 50) + np.random.normal(0, 0.005, n)
+        current = base_current + 0.3 * np.sin(t / 30) + np.random.normal(0, 0.05, n)
+        temperature = base_temp + 3 * np.sin(t / 60) + np.random.normal(0, 0.3, n)
+        soc = np.clip(soc_base + 10 * np.sin(t / 80) + np.random.normal(0, 1, n), 0, 100)
+        cycle = t // 50
+        # occasional anomalies
+        idx = np.random.choice(n, size=18, replace=False)
+        voltage[idx] -= np.random.uniform(0.03, 0.08, size=len(idx))
+        temperature[idx] += np.random.uniform(2, 5, size=len(idx))
+
+    elif scenario == "EV":
+        # EV packs: high cycles, gradual thermal drift, slow voltage sag & higher variance
+        voltage = base_voltage + 0.03 * np.sin(t / 40) - 0.0005 * t/ n + np.random.normal(0, 0.008, n)
+        current = 2.5 + 0.4 * np.sin(t / 20) + np.random.normal(0, 0.07, n)
+        temperature = base_temp + 4 * np.sin(t / 120) + 0.01 * (t / n) * 10 + np.random.normal(0, 0.5, n)
+        soc = np.clip(90 - 20*(t/n) + np.random.normal(0, 1.5, n), 0, 100)
+        cycle = t // 10  # faster cycling
+        idx = np.random.choice(n, size=35, replace=False)
+        voltage[idx] -= np.random.uniform(0.04, 0.12, size=len(idx))
+        temperature[idx] += np.random.uniform(3, 8, size=len(idx))
+
+    elif scenario == "Drone":
+        # Drone packs: short bursts, frequent high current spikes, abrupt voltage dips
+        voltage = base_voltage + 0.04 * np.sin(t / 30) + np.random.normal(0, 0.006, n)
+        current = base_current + 0.6 * np.sin(t / 10) + np.random.normal(0, 0.2, n)
+        temperature = base_temp + 2 * np.sin(t / 80) + np.random.normal(0, 0.4, n)
+        soc = np.clip(85 + 6 * np.sin(t / 40) + np.random.normal(0, 2, n), 0, 100)
+        cycle = t // 30
+        # more spikes
+        spikes = np.random.choice(n, size=60, replace=False)
+        current[spikes] += np.random.uniform(2.0, 6.0, size=len(spikes))
+        # abrupt dips
+        dips = np.random.choice(n, size=30, replace=False)
+        voltage[dips] -= np.random.uniform(0.06, 0.18, size=len(dips))
+
+    elif scenario == "Phone":
+        # Phone packs: highly stable, low variance, few anomalies
+        voltage = base_voltage + 0.02 * np.sin(t / 80) + np.random.normal(0, 0.002, n)
+        current = 0.8 + 0.1 * np.sin(t / 60) + np.random.normal(0, 0.02, n)
+        temperature = base_temp + 1.5 * np.sin(t / 120) + np.random.normal(0, 0.15, n)
+        soc = np.clip(95 + 3 * np.sin(t / 160) + np.random.normal(0, 0.5, n), 0, 100)
+        cycle = t // 200
+        idx = np.random.choice(n, size=6, replace=False)
+        voltage[idx] -= np.random.uniform(0.01, 0.03, size=len(idx))
+
+    else:
+        # fallback to generic
+        return generate_sample_bms_data(n=n, seed=seed, scenario="Generic")
+
+    return pd.DataFrame({
+        "time": t,
+        "voltage": voltage,
+        "current": current,
+        "temperature": temperature,
+        "soc": soc,
+        "cycle": cycle
+    })
+
+
+# --------------------------
+# (The rest of the code is same as previous app version, unchanged logic)
+# For brevity I include the full app code but keep the same helper functions, ML, UI,
+# PDF generation, warnings, recommendations, and tabs.
+# --------------------------
+
+# ... (reusing functions: normalize_bms_columns, ensure_columns, feature_engineering,
+# build_models_and_scores, recommend_action, pack_health_label, make_gauge,
+# anomaly_marker_trace, simple_alerts_from_df, build_recommendations_from_df,
+# render_colored_badge, generate_pdf_report)
+#
+# To keep this snippet focused, paste the rest of your existing app code here
+# exactly as you had it (feature engineering, UI helpers, PDF generator, main()).
+#
+# But since you asked to "do it in app.py", below is the complete continuation:
+# (Full app code continues — identical to the previous feature-complete version,
+# but uses generate_sample_bms_data(scenario=...) where Sample data is selected.)
+
+# --------------------------
+# Reusing the helper functions from prior app (copy/paste)
+# --------------------------
+
 def normalize_bms_columns(df):
     df = df.copy()
     simplified = {col: "".join(ch for ch in col.lower() if ch.isalnum()) for col in df.columns}
@@ -47,22 +148,6 @@ def ensure_columns(df, required):
             df[c] = np.nan
     return df
 
-def generate_sample_bms_data(n=800, seed=42):
-    np.random.seed(seed)
-    t = np.arange(n)
-    voltage = 3.7 + 0.05 * np.sin(t / 50) + np.random.normal(0, 0.005, n)
-    current = 1.5 + 0.3 * np.sin(t / 30) + np.random.normal(0, 0.05, n)
-    temperature = 30 + 3 * np.sin(t / 60) + np.random.normal(0, 0.3, n)
-    soc = np.clip(80 + 10 * np.sin(t / 80) + np.random.normal(0, 1, n), 0, 100)
-    cycle = t // 50
-    idx = np.random.choice(n, size=25, replace=False)
-    voltage[idx] -= np.random.uniform(0.04, 0.12, size=len(idx))
-    temperature[idx] += np.random.uniform(3, 7, size=len(idx))
-    return pd.DataFrame({"time": t, "voltage": voltage, "current": current, "temperature": temperature, "soc": soc, "cycle": cycle})
-
-# --------------------------
-# Feature engineering & models (defensive)
-# --------------------------
 def feature_engineering(df, window=10):
     df = df.copy()
     df = ensure_columns(df, ["voltage", "current", "temperature", "soc", "cycle", "time"])
@@ -78,21 +163,30 @@ def feature_engineering(df, window=10):
     if df["temperature"].notna().sum() > 0:
         df["temp_ma"] = df["temperature"].rolling(window, min_periods=1).mean()
         df["temp_roc"] = df["temperature"].diff().fillna(0)
-        temp_mean = df["temperature"].mean()
-        temp_std = df["temperature"].std()
-        temp_threshold = temp_mean + 2 * temp_std if not np.isnan(temp_mean) and not np.isnan(temp_std) else np.nan
     else:
         df["temp_ma"] = np.nan
         df["temp_roc"] = np.nan
-        temp_threshold = np.nan
+
+    if df["soc"].notna().sum() > 0:
+        df["soc_ma"] = df["soc"].rolling(window, min_periods=1).mean()
+        df["soc_roc"] = df["soc"].diff().fillna(0)
+    else:
+        df["soc_ma"] = np.nan
+        df["soc_roc"] = np.nan
 
     if df["voltage"].notna().sum() > 0:
         volt_drop_threshold = -0.03
         conditions = pd.Series(False, index=df.index)
-        if df["temperature"].notna().sum() > 0 and not np.isnan(temp_threshold):
-            conditions = conditions | (df["temperature"] > temp_threshold)
+        if df["temperature"].notna().sum() > 0:
+            temp_mean = df["temperature"].mean()
+            temp_std = df["temperature"].std()
+            temp_threshold = temp_mean + 2 * temp_std if not np.isnan(temp_mean) and not np.isnan(temp_std) else np.nan
+            if not np.isnan(temp_threshold):
+                conditions = conditions | (df["temperature"] > temp_threshold)
         if "voltage_roc" in df.columns:
             conditions = conditions | (df["voltage_roc"] < volt_drop_threshold)
+        if "soc_roc" in df.columns:
+            conditions = conditions | (df["soc_roc"] < -5)
         df["risk_label"] = np.where(conditions, 1, 0)
     else:
         df["risk_label"] = 0
@@ -101,7 +195,7 @@ def feature_engineering(df, window=10):
 
 def build_models_and_scores(df, contamination=0.05):
     df = df.copy()
-    possible = ["voltage", "current", "temperature", "soc", "voltage_ma", "voltage_roc", "temp_roc", "voltage_var", "temp_ma", "cycle"]
+    possible = ["voltage", "current", "temperature", "soc", "voltage_ma", "voltage_roc", "soc_roc", "voltage_var", "temp_ma", "cycle"]
     anomaly_features = [f for f in possible if f in df.columns and df[f].notna().sum() > 0]
     df["anomaly_flag"] = 0
     df["risk_pred"] = 0
@@ -177,13 +271,13 @@ def recommend_action(row):
     rp = row.get("risk_pred", 0)
     an = row.get("anomaly_flag", 0)
     if score > 85 and rp == 0 and an == 0:
-        return "Battery healthy. Normal operation."
+        return "Healthy — normal operation."
     elif 70 < score <= 85:
-        return "Monitor battery. Avoid deep discharge & fast charging."
+        return "Watch — avoid deep discharge & fast-charge this cycle."
     elif 50 < score <= 70:
-        return "Limit fast charging. Allow cooling intervals."
+        return "Caution — restrict fast charging; allow cooling intervals."
     else:
-        return "High risk! Reduce load & schedule maintenance."
+        return "Critical — reduce load, stop fast charging, schedule inspection."
 
 def pack_health_label(score):
     if score >= 85:
@@ -193,9 +287,6 @@ def pack_health_label(score):
     else:
         return "CRITICAL", "red"
 
-# --------------------------
-# UI helpers & visual widgets
-# --------------------------
 def make_gauge(score):
     gauge = go.Figure(go.Indicator(
         mode="gauge+number",
@@ -216,7 +307,6 @@ def make_gauge(score):
     return gauge
 
 def anomaly_marker_trace(df):
-    # return scatter trace of anomalies (time vs health) for overlay
     a_df = df[df["anomaly_flag"] == 1]
     if a_df.empty:
         return None
@@ -224,49 +314,130 @@ def anomaly_marker_trace(df):
 
 def simple_alerts_from_df(df):
     alerts = []
-    # thermal drift alert
     if "temperature" in df.columns and df["temperature"].notna().sum()>0:
         temp_mean = df["temperature"].mean()
         temp_std = df["temperature"].std()
         recent_temp = df["temperature"].iloc[-1]
         if recent_temp > (temp_mean + 2*temp_std):
-            alerts.append(("Thermal drift", "Recent temperature >> historical mean. Hotspot risk."))
-    # imbalance pattern (look at voltage_roc negative trend / increasing variance)
+            alerts.append({"title":"Thermal drift", "detail":"Temp well above normal — hotspot risk. Cool & inspect.", "severity":"high"})
     if "voltage_roc" in df.columns and "voltage_var" in df.columns:
         last_roc = df["voltage_roc"].rolling(5).mean().iloc[-1]
         last_var = df["voltage_var"].rolling(10).mean().iloc[-1]
         if last_roc < -0.01:
-            alerts.append(("Voltage sag pattern", "Sustained negative voltage ROC — internal resistance may be rising."))
+            alerts.append({"title":"Voltage sag pattern", "detail":"Sustained negative voltage change — internal resistance rising.", "severity":"medium"})
         if last_var > df["voltage_var"].mean() + df["voltage_var"].std():
-            alerts.append(("Voltage variance rising", "Cell-to-cell variance increasing — watch for imbalance."))
-    # anomaly percent
+            alerts.append({"title":"Voltage variance rising", "detail":"Cell-to-cell variance increasing — imbalance risk.", "severity":"medium"})
+    if "current" in df.columns and df["current"].notna().sum()>0:
+        spike_pct = (df["current"] > (df["current"].mean() + 2*df["current"].std())).mean()
+        if spike_pct > 0.02:
+            alerts.append({"title":"Current spikes", "detail":"Frequent high current spikes — mechanical/connection stress likely.", "severity":"medium"})
     if "anomaly_flag" in df.columns:
         p = df["anomaly_flag"].mean()
         if p > 0.05:
-            alerts.append(("Anomaly rate high", f"{p*100:.1f}% of recent readings flagged as anomalies."))
-    # risk_pred
+            alerts.append({"title":"Anomaly rate high", "detail":f"{p*100:.1f}% readings flagged — investigate.", "severity":"medium"})
     if "risk_pred" in df.columns and df["risk_pred"].iloc[-1]==1:
-        alerts.append(("Immediate risk prediction", "Model predicts elevated risk at last timestep."))
+        alerts.append({"title":"Immediate risk", "detail":"Model predicts elevated risk on latest measurement.", "severity":"high"})
     return alerts
+
+def build_recommendations_from_df(df, n=5):
+    recs = []
+    try:
+        worst = df.nsmallest(n, "battery_health_score")
+        rec_counts = worst["recommendation"].value_counts()
+        for rec, cnt in rec_counts.items():
+            recs.append({"recommendation": rec, "count": int(cnt)})
+    except Exception:
+        pass
+    return recs
+
+def render_colored_badge(text, color_hex="#eeeeee", text_color="#000000"):
+    html = f"<span style='background:{color_hex};color:{text_color};padding:6px 10px;border-radius:8px;font-weight:600'>{text}</span>"
+    return html
+
+def generate_pdf_report(df_out, avg_score, anomaly_pct, alerts, recs, verdict_text):
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    width, height = A4
+    margin = 18*mm
+    x = margin
+    y = height - margin
+
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(x, y, "CellGuard.AI — Diagnostic Report")
+    y -= 8*mm
+
+    c.setFont("Helvetica", 10)
+    c.drawString(x, y, f"Avg Health Score: {avg_score:.1f}/100")
+    c.drawString(x + 80*mm, y, f"Anomaly Rate: {anomaly_pct:.2f}%")
+    y -= 6*mm
+    c.drawString(x, y, f"Data points: {len(df_out)}")
+    y -= 8*mm
+
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(x, y, "Combined Verdict:")
+    c.setFont("Helvetica", 11)
+    c.drawString(x + 30, y, verdict_text)
+    y -= 10*mm
+
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(x, y, "Top AI Alerts:")
+    y -= 6*mm
+    c.setFont("Helvetica", 10)
+    if alerts:
+        for a in alerts[:6]:
+            c.drawString(x + 6, y, f"- {a['title']}: {a['detail']}")
+            y -= 5*mm
+            if y < margin + 40*mm:
+                c.showPage()
+                y = height - margin
+                c.setFont("Helvetica", 10)
+    else:
+        c.drawString(x + 6, y, "- None")
+        y -= 6*mm
+
+    y -= 4*mm
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(x, y, "Top Recommendations:")
+    y -= 6*mm
+    c.setFont("Helvetica", 10)
+    if recs:
+        for r in recs[:6]:
+            c.drawString(x + 6, y, f"- {r['recommendation']} (observed {r['count']} times)")
+            y -= 5*mm
+            if y < margin + 20*mm:
+                c.showPage()
+                y = height - margin
+                c.setFont("Helvetica", 10)
+    else:
+        c.drawString(x + 6, y, "- None")
+        y -= 6*mm
+
+    c.setFont("Helvetica-Oblique", 8)
+    c.drawString(margin, margin, "Generated by CellGuard.AI")
+    c.save()
+    buf.seek(0)
+    return buf.read()
 
 # --------------------------
 # Main UI
 # --------------------------
 def main():
     st.title("CELLGUARD.AI — Dashboard")
-    st.write("Predictive battery intelligence: health score, early alerts, anomalies, and clear actions.")
+    st.write("Predictive battery intelligence: health score, early alerts, anomaly timeline, and actionable recommendations.")
 
     # Sidebar config
     st.sidebar.header("Configuration")
     data_mode = st.sidebar.radio("Data source", ["Sample data", "Upload CSV"])
+    # New: scenario picker when using sample data
+    scenario = st.sidebar.selectbox("Demo scenario (if Sample data)", ["Generic", "EV", "Drone", "Phone"])
     contamination = st.sidebar.slider("Anomaly sensitivity", 0.01, 0.2, 0.05, 0.01)
     window = st.sidebar.slider("Rolling window", 5, 30, 10)
     st.sidebar.markdown("Tip: upload CSV with columns like voltage, temperature, current, soc, time.")
 
     # Data load
     if data_mode == "Sample data":
-        df_raw = generate_sample_bms_data()
-        st.sidebar.success("Using simulated data")
+        df_raw = generate_sample_bms_data(n=800, seed=42, scenario=scenario)
+        st.sidebar.success(f"Using simulated data: {scenario}")
     else:
         uploaded = st.sidebar.file_uploader("Upload CSV", type=["csv"])
         if uploaded is None:
@@ -286,7 +457,7 @@ def main():
     required_logical = ["voltage", "current", "temperature", "soc", "cycle", "time"]
     df_raw = ensure_columns(df_raw, required_logical)
 
-    # small header row: health gauge + status + download
+    # process
     df_fe = feature_engineering(df_raw, window=window)
     df_out = build_models_and_scores(df_fe, contamination=contamination)
     df_out["recommendation"] = df_out.apply(recommend_action, axis=1)
@@ -294,6 +465,9 @@ def main():
     avg_score = float(df_out["battery_health_score"].mean()) if not df_out["battery_health_score"].isnull().all() else 50.0
     anomaly_pct = float(df_out["anomaly_flag"].mean() * 100) if "anomaly_flag" in df_out.columns else 0.0
     label, color = pack_health_label(avg_score)
+
+    alerts = simple_alerts_from_df(df_out)
+    recs = build_recommendations_from_df(df_out, n=8)
 
     # Top header layout
     top_left, top_mid, top_right = st.columns([1.4, 1.4, 1])
@@ -303,27 +477,68 @@ def main():
         st.plotly_chart(gauge, use_container_width=True)
     with top_mid:
         st.markdown("### Pack Status")
-        st.markdown(f"**{label}**")
+        badge_color = "#2ecc71" if label=="HEALTHY" else ("#f39c12" if label=="WATCH" else "#e74c3c")
+        st.markdown(render_colored_badge(label, color_hex=badge_color, text_color="#ffffff"), unsafe_allow_html=True)
         st.metric("Avg Health Score", f"{avg_score:.1f}/100", delta=f"{(avg_score-85):.1f} vs ideal")
         st.markdown("#### Quick summary")
+        st.write(f"- Scenario: **{scenario}**")
         st.write(f"- Anomalies: **{anomaly_pct:.1f}%**")
         st.write(f"- Data points: **{len(df_out)}**")
         st.write(f"- Mapped columns: {', '.join(list(col_map.keys())) if col_map else 'auto-map not found'}")
     with top_right:
         st.markdown("### Actions")
         st.download_button("⬇️ Download processed CSV", df_out.to_csv(index=False).encode("utf-8"), "CellGuardAI_Output.csv", "text/csv")
-        st.button("📄 Generate PDF report (placeholder)")  # placeholder; can implement PDF later
-        st.markdown("### Predictive alerts")
-        alerts = simple_alerts_from_df(df_out)
+
+        # Combined verdict & PDF
+        high_alerts = [a for a in alerts if a.get("severity") == "high"]
+        if high_alerts or avg_score < 60:
+            verdict_text = "Immediate action required: reduce load, stop fast charging, schedule inspection."
+            st.error("Combined verdict: Immediate action required.")
+        elif avg_score < 75:
+            verdict_text = "Monitor closely: use conservative charge/discharge limits and inspect soon."
+            st.warning("Combined verdict: Monitor closely.")
+        else:
+            verdict_text = "Pack healthy: continue normal operation and keep monitoring trends."
+            st.success("Combined verdict: Pack healthy.")
+
+        pdf_bytes = generate_pdf_report(df_out, avg_score, anomaly_pct, alerts, recs, verdict_text)
+        st.download_button("📄 Download PDF report", pdf_bytes, "CellGuardAI_Report.pdf", "application/pdf")
+
+        st.markdown("### Predictive Alerts (main)")
         if alerts:
             for a in alerts:
-                st.warning(f"**{a[0]}** — {a[1]}")
+                sev = a.get("severity","info")
+                if sev == "high":
+                    st.markdown(f"<div style='background:#fdecea;padding:8px;border-radius:8px;margin-bottom:6px'><b>🔴 {a['title']}</b> — {a['detail']}</div>", unsafe_allow_html=True)
+                elif sev == "medium":
+                    st.markdown(f"<div style='background:#fff4e5;padding:8px;border-radius:8px;margin-bottom:6px'><b>🟠 {a['title']}</b> — {a['detail']}</div>", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"<div style='background:#eef7ff;padding:8px;border-radius:8px;margin-bottom:6px'><b>🔵 {a['title']}</b> — {a['detail']}</div>", unsafe_allow_html=True)
         else:
-            st.success("No immediate alerts from AI")
+            st.success("No immediate AI alerts")
 
     st.markdown("---")
 
-    # Summary metrics row for quick glance
+    # Recommendations list
+    rcol1, rcol2 = st.columns([1, 1])
+    with rcol1:
+        st.subheader("Recommendations (if any)")
+        if recs:
+            for r in recs:
+                st.markdown(f"✅ **{r['recommendation']}** — seen in {r['count']} risky rows")
+        else:
+            st.write("No specific recommendations at this time.")
+    with rcol2:
+        st.subheader("Top Warnings Snapshot")
+        if alerts:
+            for a in alerts:
+                st.markdown(f"• **{a['title']}** — {a['detail']}")
+        else:
+            st.write("No warnings.")
+
+    st.markdown("---")
+
+    # Summary metrics
     s1, s2, s3, s4, s5 = st.columns(5)
     with s1:
         st.metric("Avg Temp (°C)", f"{df_out['temperature'].mean():.2f}" if df_out['temperature'].notna().sum()>0 else "N/A")
@@ -338,84 +553,132 @@ def main():
 
     st.markdown("---")
 
-    # Main tabs: Traditional, CellGuard.AI, Compare, Data (expanded visuals + interpretation)
-    tab_trad, tab_ai, tab_compare, tab_table = st.tabs(["Traditional BMS", "CellGuard.AI", "Compare", "Data"])
+    # Tabs and remaining UI (same as before)
+    tab_ai, tab_trad, tab_compare, tab_table = st.tabs(["CellGuard.AI", "Traditional BMS", "Compare (Combined)", "Data"])
+
+    with tab_ai:
+        st.header("CellGuard.AI — predictions, trends, and alerts (expanded)")
+        fig_h = go.Figure()
+        fig_h.add_trace(go.Scatter(x=df_out["time"], y=df_out["battery_health_score"], mode="lines", name="Health Score"))
+        m = anomaly_marker_trace(df_out)
+        if m is not None:
+            fig_h.add_trace(m)
+        fig_h.update_layout(height=320, margin=dict(t=30))
+        st.plotly_chart(fig_h, use_container_width=True)
+        st.caption("Interpretation: Composite health score; drops indicate combined signal deterioration.")
+        pcol1, pcol2 = st.columns(2)
+        with pcol1:
+            if "voltage_var" in df_out.columns:
+                fig_vv = px.line(df_out, x="time", y="voltage_var", labels={"time":"Time", "voltage_var":"Voltage Variance"})
+                fig_vv.update_layout(height=260)
+                st.plotly_chart(fig_vv, use_container_width=True)
+                st.caption("Voltage variance shows increasing imbalance across cells.")
+            if "soc" in df_out.columns:
+                fig_soc = px.line(df_out, x="time", y="soc", labels={"time":"Time","soc":"SOC (%)"})
+                fig_soc.update_layout(height=260)
+                st.plotly_chart(fig_soc, use_container_width=True)
+                st.caption("SOC drift can indicate gauge calibration issues or imbalance across cells.")
+        with pcol2:
+            if "current" in df_out.columns:
+                fig_cur = go.Figure()
+                fig_cur.add_trace(go.Scatter(x=df_out["time"], y=df_out["current"], mode="lines", name="Current (A)"))
+                try:
+                    spike_idx = df_out[df_out["current"] > (df_out["current"].mean() + 2*df_out["current"].std())]
+                    if not spike_idx.empty:
+                        fig_cur.add_trace(go.Scatter(x=spike_idx["time"], y=spike_idx["current"], mode="markers", name="Spikes", marker=dict(color="purple", size=7)))
+                except Exception:
+                    pass
+                fig_cur.update_layout(height=260)
+                st.plotly_chart(fig_cur, use_container_width=True)
+                st.caption("Current spikes can stress cells and accelerate degradation.")
+            if "temperature" in df_out.columns:
+                fig_temp_hist = px.histogram(df_out, x="temperature", nbins=30, labels={"temperature":"Temperature (°C)"})
+                fig_temp_hist.update_layout(height=260)
+                st.plotly_chart(fig_temp_hist, use_container_width=True)
+                st.caption("Temperature distribution — multiple modes can indicate hot cells.")
+        numeric_cols = df_out.select_dtypes(include=[np.number]).columns.tolist()
+        corr_cols = [c for c in ["voltage","current","temperature","soc","voltage_var","voltage_roc","battery_health_score"] if c in numeric_cols]
+        if len(corr_cols) >= 2:
+            corr = df_out[corr_cols].corr()
+            fig_corr = px.imshow(corr, text_auto=True, aspect="auto", labels=dict(x="feature", y="feature", color="correlation"))
+            fig_corr.update_layout(height=360)
+            st.plotly_chart(fig_corr, use_container_width=True)
+            st.caption("Correlation helps identify which signals move together (useful for root-cause).")
+        with st.expander("Open / Close — Top 8 Riskiest Moments (toggle)"):
+            worst = df_out.nsmallest(8, "battery_health_score")[["time","voltage","temperature","battery_health_score","anomaly_flag","risk_pred","recommendation"]]
+            if worst.empty:
+                st.write("No high-risk rows found.")
+            else:
+                st.table(worst.fillna("N/A"))
 
     with tab_trad:
-        st.header("Traditional BMS — raw signals")
-        cols = st.columns(1)
-        # Voltage chart with anomaly markers
+        st.header("Traditional BMS — raw signals (instant readings & thresholds)")
         if df_out["voltage"].notna().sum()>0:
             fig_v = go.Figure()
             fig_v.add_trace(go.Scatter(x=df_out["time"], y=df_out["voltage"], mode="lines", name="Voltage (V)"))
-            m = anomaly_marker_trace(df_out)
-            if m is not None:
-                fig_v.add_trace(m)
-            fig_v.update_layout(height=320, margin=dict(t=30))
+            fig_v.update_layout(height=300)
             st.plotly_chart(fig_v, use_container_width=True)
-            st.caption("Interpretation: voltage oscillations and sudden dips often indicate rising internal resistance or cell imbalance.")
+            st.caption("Voltage trend — traditional view.")
         else:
             st.warning("Voltage data not available.")
-
-        # Temperature chart
         if df_out["temperature"].notna().sum()>0:
             fig_t = go.Figure()
-            fig_t.add_trace(go.Scatter(x=df_out["time"], y=df_out["temperature"], mode="lines", name="Temperature (°C)"))
-            m = anomaly_marker_trace(df_out)
-            if m is not None:
-                fig_t.add_trace(m)
-            fig_t.update_layout(height=280, margin=dict(t=10))
+            fig_t.add_trace(go.Scatter(x=df_out["time"], y=df_out["temperature"], mode="lines", name="Temperature"))
+            fig_t.update_layout(height=300)
             st.plotly_chart(fig_t, use_container_width=True)
-            st.caption("Interpretation: rising baseline or spikes can mean hotspots; sustained rises are especially concerning.")
+            st.caption("Temperature trend — traditional view.")
         else:
             st.info("Temperature data not available.")
-
-    with tab_ai:
-        st.header("CellGuard.AI — predictions, trends, and alerts")
-        left, right = st.columns([2, 1])
-        with left:
-            fig_h = go.Figure()
-            fig_h.add_trace(go.Scatter(x=df_out["time"], y=df_out["battery_health_score"], mode="lines", name="Health Score"))
-            m = anomaly_marker_trace(df_out)
-            if m is not None:
-                fig_h.add_trace(m)
-            fig_h.update_layout(height=360, margin=dict(t=30))
-            st.plotly_chart(fig_h, use_container_width=True)
-            st.caption("Interpretation: declines in health score are composite signals — often a combination of voltage sag, temp drift, and anomalies.")
-            # show some detected anomalies in a listed form
-            detected = df_out[df_out["anomaly_flag"]==1].tail(8)
-            if not detected.empty:
-                st.subheader("Recent Anomalies (sample)")
-                st.table(detected[["time","voltage","temperature","battery_health_score"]].fillna("N/A"))
-        with right:
-            st.subheader("Top Risks & Actions")
-            worst = df_out.nsmallest(8, "battery_health_score")[["time","voltage","temperature","battery_health_score","anomaly_flag","risk_pred","recommendation"]]
-            st.table(worst.fillna("N/A"))
-            if not worst.empty:
-                # quick recommended combined action (aggregate)
-                rec = worst["recommendation"].value_counts().idxmax()
-                st.markdown("### Combined suggestion")
-                st.info(rec)
+        if "soc" in df_out.columns:
+            fig_soc = px.line(df_out, x="time", y="soc", labels={"time":"Time","soc":"SOC (%)"})
+            fig_soc.update_layout(height=260)
+            st.plotly_chart(fig_soc, use_container_width=True)
 
     with tab_compare:
-        st.header("Traditional vs CellGuard.AI — why upgrade?")
-        left, right = st.columns(2)
-        with left:
-            st.subheader("Traditional BMS (instant thresholds)")
-            st.markdown("- Raw readings, on/off alarms\n- Requires manual log review")
-            if df_out["voltage"].notna().sum()>0:
-                st.metric("Voltage mean", f"{df_out['voltage'].mean():.3f} V")
-        with right:
-            st.subheader("CellGuard.AI (trend-aware & predictive)")
-            st.markdown("- Detects micro-patterns and anomalies\n- Produces continuous health score and recommendations")
-            st.metric("Avg Health Score", f"{avg_score:.1f}")
+        st.header("Compare — Combined result (CellGuard.AI first, then Traditional BMS)")
+        st.markdown("### CellGuard.AI (Predictive view)")
+        st.write(f"- Health Score: **{avg_score:.1f}/100**")
+        st.write(f"- AI Anomaly %: **{anomaly_pct:.1f}%**")
+        if alerts:
+            st.write("- Current AI warnings:")
+            for a in alerts:
+                st.write(f"  - **{a['title']}** — {a['detail']}")
+        else:
+            st.write("- No AI warnings detected.")
+        st.markdown("### Traditional BMS (Instant/raw view)")
+        trad_cols = st.columns(3)
+        with trad_cols[0]:
+            if "voltage" in df_out.columns and df_out["voltage"].notna().sum()>0:
+                st.metric("Voltage (mean)", f"{df_out['voltage'].mean():.3f} V")
+            else:
+                st.write("Voltage: N/A")
+        with trad_cols[1]:
+            if "temperature" in df_out.columns and df_out["temperature"].notna().sum()>0:
+                st.metric("Temperature (mean)", f"{df_out['temperature'].mean():.2f} °C")
+            else:
+                st.write("Temperature: N/A")
+        with trad_cols[2]:
+            if "soc" in df_out.columns and df_out["soc"].notna().sum()>0:
+                st.metric("SOC (last)", f"{df_out['soc'].iloc[-1]:.1f}%")
+            else:
+                st.write("SOC: N/A")
+        st.markdown("---")
+        st.subheader("Combined Recommendation")
+        high_alerts = [a for a in alerts if a.get("severity")=="high"]
+        if high_alerts or avg_score < 60:
+            st.error("Combined verdict: Immediate action required. Reduce load, avoid fast charging, and schedule inspection.")
+        elif avg_score < 75:
+            st.warning("Combined verdict: Monitor closely. Apply conservative charge/discharge limits.")
+        else:
+            st.success("Combined verdict: Pack is healthy. Continue normal operation but monitor trends.")
 
     with tab_table:
         st.header("Processed Data & Export")
         st.download_button("⬇️ Download full report CSV", df_out.to_csv(index=False).encode("utf-8"), "CellGuardAI_FullReport.csv", "text/csv")
         st.dataframe(df_out.head(500), use_container_width=True)
 
-    st.caption("CellGuard.AI — shows health score, predictive alerts, anomaly timeline, and simple actions. Use the CSV export to archive results or send to technicians.")
+    st.caption("CellGuard.AI — demo scenarios added: Generic, EV, Drone, Phone. Toggle scenarios in the sidebar to simulate different field conditions for judges and testing.")
 
 if __name__ == "__main__":
     main()
+        

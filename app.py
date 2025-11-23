@@ -1,7 +1,6 @@
-# app.py
-# CellGuard.AI — Dashboard with demo dataset selector (EV / Drone / Phone presets)
-# All prior features included: health gauge, alerts, extra charts, colored warnings, PDF export.
 
+# app.py
+# CellGuard.AI - Final dashboard with scenario selector, unique Streamlit keys, PDF export, and robust charts.
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -21,13 +20,6 @@ st.set_page_config(page_title="CellGuard.AI - Dashboard", layout="wide")
 # Data generators (scenarios)
 # --------------------------
 def generate_sample_bms_data(n=800, seed=42, scenario="Generic"):
-    """
-    Scenarios:
-    - Generic: balanced synthetic signals (default)
-    - EV: higher cycles, gradual thermal drift, slow voltage sag
-    - Drone: frequent high current spikes, abrupt voltage dips
-    - Phone: low variance, stable small-signal behavior
-    """
     np.random.seed(seed)
     t = np.arange(n)
     base_voltage = 3.7
@@ -41,38 +33,32 @@ def generate_sample_bms_data(n=800, seed=42, scenario="Generic"):
         temperature = base_temp + 3 * np.sin(t / 60) + np.random.normal(0, 0.3, n)
         soc = np.clip(soc_base + 10 * np.sin(t / 80) + np.random.normal(0, 1, n), 0, 100)
         cycle = t // 50
-        # occasional anomalies
         idx = np.random.choice(n, size=18, replace=False)
         voltage[idx] -= np.random.uniform(0.03, 0.08, size=len(idx))
         temperature[idx] += np.random.uniform(2, 5, size=len(idx))
 
     elif scenario == "EV":
-        # EV packs: high cycles, gradual thermal drift, slow voltage sag & higher variance
         voltage = base_voltage + 0.03 * np.sin(t / 40) - 0.0005 * t/ n + np.random.normal(0, 0.008, n)
         current = 2.5 + 0.4 * np.sin(t / 20) + np.random.normal(0, 0.07, n)
         temperature = base_temp + 4 * np.sin(t / 120) + 0.01 * (t / n) * 10 + np.random.normal(0, 0.5, n)
         soc = np.clip(90 - 20*(t/n) + np.random.normal(0, 1.5, n), 0, 100)
-        cycle = t // 10  # faster cycling
+        cycle = t // 10
         idx = np.random.choice(n, size=35, replace=False)
         voltage[idx] -= np.random.uniform(0.04, 0.12, size=len(idx))
         temperature[idx] += np.random.uniform(3, 8, size=len(idx))
 
     elif scenario == "Drone":
-        # Drone packs: short bursts, frequent high current spikes, abrupt voltage dips
         voltage = base_voltage + 0.04 * np.sin(t / 30) + np.random.normal(0, 0.006, n)
         current = base_current + 0.6 * np.sin(t / 10) + np.random.normal(0, 0.2, n)
         temperature = base_temp + 2 * np.sin(t / 80) + np.random.normal(0, 0.4, n)
         soc = np.clip(85 + 6 * np.sin(t / 40) + np.random.normal(0, 2, n), 0, 100)
         cycle = t // 30
-        # more spikes
         spikes = np.random.choice(n, size=60, replace=False)
         current[spikes] += np.random.uniform(2.0, 6.0, size=len(spikes))
-        # abrupt dips
         dips = np.random.choice(n, size=30, replace=False)
         voltage[dips] -= np.random.uniform(0.06, 0.18, size=len(dips))
 
     elif scenario == "Phone":
-        # Phone packs: highly stable, low variance, few anomalies
         voltage = base_voltage + 0.02 * np.sin(t / 80) + np.random.normal(0, 0.002, n)
         current = 0.8 + 0.1 * np.sin(t / 60) + np.random.normal(0, 0.02, n)
         temperature = base_temp + 1.5 * np.sin(t / 120) + np.random.normal(0, 0.15, n)
@@ -82,7 +68,6 @@ def generate_sample_bms_data(n=800, seed=42, scenario="Generic"):
         voltage[idx] -= np.random.uniform(0.01, 0.03, size=len(idx))
 
     else:
-        # fallback to generic
         return generate_sample_bms_data(n=n, seed=seed, scenario="Generic")
 
     return pd.DataFrame({
@@ -94,29 +79,9 @@ def generate_sample_bms_data(n=800, seed=42, scenario="Generic"):
         "cycle": cycle
     })
 
-
 # --------------------------
-# (The rest of the code is same as previous app version, unchanged logic)
-# For brevity I include the full app code but keep the same helper functions, ML, UI,
-# PDF generation, warnings, recommendations, and tabs.
+# Utilities & processing
 # --------------------------
-
-# ... (reusing functions: normalize_bms_columns, ensure_columns, feature_engineering,
-# build_models_and_scores, recommend_action, pack_health_label, make_gauge,
-# anomaly_marker_trace, simple_alerts_from_df, build_recommendations_from_df,
-# render_colored_badge, generate_pdf_report)
-#
-# To keep this snippet focused, paste the rest of your existing app code here
-# exactly as you had it (feature engineering, UI helpers, PDF generator, main()).
-#
-# But since you asked to "do it in app.py", below is the complete continuation:
-# (Full app code continues — identical to the previous feature-complete version,
-# but uses generate_sample_bms_data(scenario=...) where Sample data is selected.)
-
-# --------------------------
-# Reusing the helper functions from prior app (copy/paste)
-# --------------------------
-
 def normalize_bms_columns(df):
     df = df.copy()
     simplified = {col: "".join(ch for ch in col.lower() if ch.isalnum()) for col in df.columns}
@@ -287,6 +252,9 @@ def pack_health_label(score):
     else:
         return "CRITICAL", "red"
 
+# --------------------------
+# UI helpers & charts
+# --------------------------
 def make_gauge(score):
     gauge = go.Figure(go.Indicator(
         mode="gauge+number",
@@ -428,7 +396,6 @@ def main():
     # Sidebar config
     st.sidebar.header("Configuration")
     data_mode = st.sidebar.radio("Data source", ["Sample data", "Upload CSV"])
-    # New: scenario picker when using sample data
     scenario = st.sidebar.selectbox("Demo scenario (if Sample data)", ["Generic", "EV", "Drone", "Phone"])
     contamination = st.sidebar.slider("Anomaly sensitivity", 0.01, 0.2, 0.05, 0.01)
     window = st.sidebar.slider("Rolling window", 5, 30, 10)
@@ -470,45 +437,46 @@ def main():
     recs = build_recommendations_from_df(df_out, n=8)
 
     # Top header layout
-top_left, top_mid, top_right = st.columns([1.4, 1.4, 1])
-with top_left:
-    st.markdown("### Battery Health")
-    gauge = make_gauge(avg_score)
-    st.plotly_chart(gauge, use_container_width=True, key="gauge_main")
+    top_left, top_mid, top_right = st.columns([1.4, 1.4, 1])
+    with top_left:
+        st.markdown("### Battery Health")
+        gauge = make_gauge(avg_score)
+        st.plotly_chart(gauge, use_container_width=True, key="gauge_main")
 
-with top_mid:
-    st.markdown("### Pack Status")
-    badge_color = "#2ecc71" if label == "HEALTHY" else ("#f39c12" if label == "WATCH" else "#e74c3c")
-    st.markdown(render_colored_badge(label, color_hex=badge_color, text_color="#ffffff"), unsafe_allow_html=True)
-    st.metric("Avg Health Score", f"{avg_score:.1f}/100", delta=f"{(avg_score-85):.1f} vs ideal")
-    st.markdown("#### Quick summary")
-    st.write(f"- Scenario: **{scenario}**")
-    st.write(f"- Anomalies: **{anomaly_pct:.1f}%**")
-    st.write(f"- Data points: **{len(df_out)}**")
-    st.write(f"- Mapped columns: {', '.join(list(col_map.keys())) if col_map else 'auto-map not found'}")
+    with top_mid:
+        st.markdown("### Pack Status")
+        badge_color = "#2ecc71" if label=="HEALTHY" else ("#f39c12" if label=="WATCH" else "#e74c3c")
+        st.markdown(render_colored_badge(label, color_hex=badge_color, text_color="#ffffff"), unsafe_allow_html=True)
+        st.metric("Avg Health Score", f"{avg_score:.1f}/100", delta=f"{(avg_score-85):.1f} vs ideal")
+        st.markdown("#### Quick summary")
+        st.write(f"- Scenario: **{scenario}**")
+        st.write(f"- Anomalies: **{anomaly_pct:.1f}%**")
+        st.write(f"- Data points: **{len(df_out)}**")
+        st.write(f"- Mapped columns: {', '.join(list(col_map.keys())) if col_map else 'auto-map not found'}")
 
-with top_right:
-    st.markdown("### Actions")
-    st.download_button("⬇️ Download processed CSV", df_out.to_csv(index=False).encode("utf-8"), "CellGuardAI_Output.csv", "text/csv")
+    with top_right:
+        st.markdown("### Actions")
+        st.download_button("⬇️ Download processed CSV", df_out.to_csv(index=False).encode("utf-8"), "CellGuardAI_Output.csv", "text/csv")
 
-    high_alerts = [a for a in alerts if a.get("severity") == "high"]
-    if high_alerts or avg_score < 60:
-        verdict_text = "Immediate action required: reduce load, stop fast charging, schedule inspection."
-        st.error("Combined verdict: Immediate action required.")
-    elif avg_score < 75:
-        verdict_text = "Monitor closely: use conservative charge/discharge limits and inspect soon."
-        st.warning("Combined verdict: Monitor closely.")
-    else:
-        verdict_text = "Pack healthy: continue normal operation and keep monitoring trends."
-        st.success("Combined verdict: Pack healthy.")
+        high_alerts = [a for a in alerts if a.get("severity") == "high"]
+        if high_alerts or avg_score < 60:
+            verdict_text = "Immediate action required: reduce load, stop fast charging, schedule inspection."
+            st.error("Combined verdict: Immediate action required.")
+        elif avg_score < 75:
+            verdict_text = "Monitor closely: use conservative charge/discharge limits and inspect soon."
+            st.warning("Combined verdict: Monitor closely.")
+        else:
+            verdict_text = "Pack healthy: continue normal operation and keep monitoring trends."
+            st.success("Combined verdict: Pack healthy.")
 
+    # PDF bytes generation and download button
     pdf_bytes = generate_pdf_report(df_out, avg_score, anomaly_pct, alerts, recs, verdict_text)
-    st.download_button("📄 Download PDF report", pdf_bytes, "CellGuardAI_Report.pdf", "application/pdf")
+    st.download_button("📄 Download PDF report", pdf_bytes, "CellGuardAI_Report.pdf", "application/pdf", key="pdf_download")
 
     st.markdown("### Predictive Alerts (main)")
     if alerts:
         for i, a in enumerate(alerts):
-            sev = a.get("severity", "info")
+            sev = a.get("severity","info")
             bg = "#fdecea" if sev=="high" else ("#fff4e5" if sev=="medium" else "#eef7ff")
             icon = "🔴" if sev=="high" else ("🟠" if sev=="medium" else "🔵")
             st.markdown(
@@ -518,152 +486,156 @@ with top_right:
     else:
         st.success("No immediate AI alerts")
 
-st.markdown("---")
+    st.markdown("---")
 
-# Recommendations and Warnings
-rcol1, rcol2 = st.columns([1, 1])
-with rcol1:
-    st.subheader("Recommendations (if any)")
-    if recs:
-        for idx, r in enumerate(recs):
-            st.markdown(f"✅ **{r['recommendation']}** — seen in {r['count']} risky rows")
-    else:
-        st.write("No specific recommendations at this time.")
+    # Recommendations & Warnings
+    rcol1, rcol2 = st.columns([1, 1])
+    with rcol1:
+        st.subheader("Recommendations (if any)")
+        if recs:
+            for idx, r in enumerate(recs):
+                st.markdown(f"✅ **{r['recommendation']}** — seen in {r['count']} risky rows")
+        else:
+            st.write("No specific recommendations at this time.")
 
-with rcol2:
-    st.subheader("Top Warnings Snapshot")
-    if alerts:
-        for idx, a in enumerate(alerts):
-            st.markdown(f"• **{a['title']}** — {a['detail']}")
-    else:
-        st.write("No warnings.")
-
-st.markdown("---")
-
-# Summary Metrics
-s1, s2, s3, s4, s5 = st.columns(5)
-with s1:
-    st.metric("Avg Temp (°C)", f"{df_out['temperature'].mean():.2f}" if df_out['temperature'].notna().sum()>0 else "N/A")
-with s2:
-    st.metric("Voltage Var (mean)", f"{df_out['voltage_var'].mean():.4f}" if "voltage_var" in df_out.columns else "N/A")
-with s3:
-    st.metric("Cycle Count (max)", f"{int(df_out['cycle'].max())}" if df_out['cycle'].notna().sum()>0 else "N/A")
-with s4:
-    st.metric("Anomaly %", f"{anomaly_pct:.2f}%")
-with s5:
-    st.metric("Last Risk Pred", "HIGH" if df_out["risk_pred"].iloc[-1] == 1 else "NORMAL")
-
-st.markdown("---")
-
-# Tabs
-tab_ai, tab_trad, tab_compare, tab_table = st.tabs(["CellGuard.AI", "Traditional BMS", "Compare (Combined)", "Data"])
-
-############################
-# CellGuard.AI TAB
-############################
-with tab_ai:
-    st.header("CellGuard.AI — predictions, trends, and alerts (expanded)")
-
-    # Health Trend
-    fig_h = go.Figure()
-    fig_h.add_trace(go.Scatter(x=df_out["time"], y=df_out["battery_health_score"], mode="lines", name="Health Score"))
-    m = anomaly_marker_trace(df_out)
-    if m is not None:
-        fig_h.add_trace(m)
-    st.plotly_chart(fig_h, use_container_width=True, key="health_trend_chart")
-
-    pcol1, pcol2 = st.columns(2)
-    with pcol1:
-        if "voltage_var" in df_out.columns:
-            fig_vv = px.line(df_out, x="time", y="voltage_var")
-            st.plotly_chart(fig_vv, use_container_width=True, key="voltage_variance_chart")
-
-        if "soc" in df_out.columns:
-            fig_soc_ai = px.line(df_out, x="time", y="soc")
-            st.plotly_chart(fig_soc_ai, use_container_width=True, key="soc_ai_chart")
-
-    with pcol2:
-        if "current" in df_out.columns:
-            fig_cur = px.line(df_out, x="time", y="current")
-            st.plotly_chart(fig_cur, use_container_width=True, key="current_chart")
-
-        if "temperature" in df_out.columns:
-            fig_temp_hist = px.histogram(df_out, x="temperature", nbins=30)
-            st.plotly_chart(fig_temp_hist, use_container_width=True, key="temp_hist_chart")
-
-    # Correlation matrix
-    numeric_cols = df_out.select_dtypes(include=[np.number]).columns.tolist()
-    corr_cols = [c for c in ["voltage","current","temperature","soc","voltage_var","voltage_roc","battery_health_score"] if c in numeric_cols]
-    if len(corr_cols) >= 2:
-        corr = df_out[corr_cols].corr()
-        fig_corr = px.imshow(corr, text_auto=True, aspect="auto")
-        st.plotly_chart(fig_corr, use_container_width=True, key="corr_matrix_chart")
-
-    with st.expander("Open / Close — Top 8 Riskiest Moments (toggle)"):
-        worst = df_out.nsmallest(8, "battery_health_score")[["time","voltage","temperature","battery_health_score","anomaly_flag","risk_pred","recommendation"]]
-        st.table(worst.fillna("N/A"))
-
-############################
-# TRADITIONAL BMS TAB
-############################
-with tab_trad:
-    st.header("Traditional BMS — raw signals")
-
-    if df_out["voltage"].notna().sum()>0:
-        fig_v = px.line(df_out, x="time", y="voltage")
-        st.plotly_chart(fig_v, use_container_width=True, key="trad_voltage_chart")
-
-    if df_out["temperature"].notna().sum()>0:
-        fig_t = px.line(df_out, x="time", y="temperature")
-        st.plotly_chart(fig_t, use_container_width=True, key="trad_temp_chart")
-
-    fig_soc_trad = px.line(df_out, x="time", y="soc")
-    st.plotly_chart(fig_soc_trad, use_container_width=True, key="trad_soc_chart")
-
-############################
-# COMPARE TAB
-############################
-with tab_compare:
-    st.header("Compare — Combined result")
-
-    st.markdown("### CellGuard.AI (Predictive View)")
-    st.write(f"- Health Score: **{avg_score:.1f}/100**")
-    st.write(f"- AI Anomaly %: **{anomaly_pct:.1f}%**")
-
-    if alerts:
-        st.write("- Current AI warnings:")
-        for a in alerts:
-            st.write(f"  - **{a['title']}** — {a['detail']}")
-    else:
-        st.write("- No AI warnings")
-
-    st.markdown("### Traditional BMS (Instant View)")
-    trad_cols = st.columns(3)
-    with trad_cols[0]:
-        st.metric("Voltage (mean)", f"{df_out['voltage'].mean():.3f} V")
-    with trad_cols[1]:
-        st.metric("Temperature (mean)", f"{df_out['temperature'].mean():.2f} °C")
-    with trad_cols[2]:
-        st.metric("SOC (last)", f"{df_out['soc'].iloc[-1]:.1f}%")
+    with rcol2:
+        st.subheader("Top Warnings Snapshot")
+        if alerts:
+            for idx, a in enumerate(alerts):
+                st.markdown(f"• **{a['title']}** — {a['detail']}")
+        else:
+            st.write("No warnings.")
 
     st.markdown("---")
-    st.subheader("Combined Recommendation")
 
-    if high_alerts or avg_score < 60:
-        st.error("Immediate action required.")
-    elif avg_score < 75:
-        st.warning("Monitor closely.")
-    else:
-        st.success("Pack healthy.")
+    # Summary Metrics
+    s1, s2, s3, s4, s5 = st.columns(5)
+    with s1:
+        st.metric("Avg Temp (°C)", f"{df_out['temperature'].mean():.2f}" if df_out['temperature'].notna().sum()>0 else "N/A")
+    with s2:
+        st.metric("Voltage Var (mean)", f"{df_out['voltage_var'].mean():.4f}" if "voltage_var' in df_out.columns else "N/A")
+    with s3:
+        st.metric("Cycle Count (max)", f"{int(df_out['cycle'].max())}" if df_out['cycle'].notna().sum()>0 else "N/A")
+    with s4:
+        st.metric("Anomaly %", f"{anomaly_pct:.2f}%")
+    with s5:
+        st.metric("Last Risk Pred", "HIGH" if df_out["risk_pred"].iloc[-1] == 1 else "NORMAL")
 
-############################
-# DATA TAB
-############################
-with tab_table:
-    st.header("Processed Data & Export")
-    st.download_button("⬇️ Download full report CSV", df_out.to_csv(index=False).encode("utf-8"), "CellGuardAI_FullReport.csv", "text/csv")
-    st.dataframe(df_out.head(500), use_container_width=True)
+    st.markdown("---")
 
-st.caption("CellGuard.AI — now with fixed Streamlit IDs, stable charts, and robust UI.")
+    # Tabs
+    tab_ai, tab_trad, tab_compare, tab_table = st.tabs(["CellGuard.AI", "Traditional BMS", "Compare (Combined)", "Data"])
 
-            
+    ############################
+    # CellGuard.AI TAB
+    ############################
+    with tab_ai:
+        st.header("CellGuard.AI — predictions, trends, and alerts (expanded)")
+
+        # Health Trend
+        fig_h = go.Figure()
+        fig_h.add_trace(go.Scatter(x=df_out["time"], y=df_out["battery_health_score"], mode="lines", name="Health Score"))
+        m = anomaly_marker_trace(df_out)
+        if m is not None:
+            fig_h.add_trace(m)
+        st.plotly_chart(fig_h, use_container_width=True, key="health_trend_chart")
+
+        pcol1, pcol2 = st.columns(2)
+        with pcol1:
+            if "voltage_var" in df_out.columns:
+                fig_vv = px.line(df_out, x="time", y="voltage_var")
+                st.plotly_chart(fig_vv, use_container_width=True, key="voltage_variance_chart")
+
+            if "soc" in df_out.columns:
+                fig_soc_ai = px.line(df_out, x="time", y="soc")
+                st.plotly_chart(fig_soc_ai, use_container_width=True, key="soc_ai_chart")
+
+        with pcol2:
+            if "current" in df_out.columns:
+                fig_cur = px.line(df_out, x="time", y="current")
+                st.plotly_chart(fig_cur, use_container_width=True, key="current_chart")
+
+            if "temperature" in df_out.columns:
+                fig_temp_hist = px.histogram(df_out, x="temperature", nbins=30)
+                st.plotly_chart(fig_temp_hist, use_container_width=True, key="temp_hist_chart")
+
+        # Correlation matrix
+        numeric_cols = df_out.select_dtypes(include=[np.number]).columns.tolist()
+        corr_cols = [c for c in ["voltage","current","temperature","soc","voltage_var","voltage_roc","battery_health_score"] if c in numeric_cols]
+        if len(corr_cols) >= 2:
+            corr = df_out[corr_cols].corr()
+            fig_corr = px.imshow(corr, text_auto=True, aspect="auto")
+            st.plotly_chart(fig_corr, use_container_width=True, key="corr_matrix_chart")
+
+        with st.expander("Open / Close — Top 8 Riskiest Moments (toggle)"):
+            worst = df_out.nsmallest(8, "battery_health_score")[["time","voltage","temperature","battery_health_score","anomaly_flag","risk_pred","recommendation"]]
+            if worst.empty:
+                st.write("No high-risk rows found.")
+            else:
+                st.table(worst.fillna("N/A"))
+
+    ############################
+    # TRADITIONAL BMS TAB
+    ############################
+    with tab_trad:
+        st.header("Traditional BMS — raw signals")
+
+        if df_out["voltage"].notna().sum()>0:
+            fig_v = px.line(df_out, x="time", y="voltage")
+            st.plotly_chart(fig_v, use_container_width=True, key="trad_voltage_chart")
+
+        if df_out["temperature"].notna().sum()>0:
+            fig_t = px.line(df_out, x="time", y="temperature")
+            st.plotly_chart(fig_t, use_container_width=True, key="trad_temp_chart")
+
+        fig_soc_trad = px.line(df_out, x="time", y="soc")
+        st.plotly_chart(fig_soc_trad, use_container_width=True, key="trad_soc_chart")
+
+    ############################
+    # COMPARE TAB
+    ############################
+    with tab_compare:
+        st.header("Compare — Combined result")
+
+        st.markdown("### CellGuard.AI (Predictive View)")
+        st.write(f"- Health Score: **{avg_score:.1f}/100**")
+        st.write(f"- AI Anomaly %: **{anomaly_pct:.1f}%**")
+
+        if alerts:
+            st.write("- Current AI warnings:")
+            for a in alerts:
+                st.write(f"  - **{a['title']}** — {a['detail']}")
+        else:
+            st.write("- No AI warnings")
+
+        st.markdown("### Traditional BMS (Instant View)")
+        trad_cols = st.columns(3)
+        with trad_cols[0]:
+            st.metric("Voltage (mean)", f"{df_out['voltage'].mean():.3f} V" if "voltage" in df_out.columns else "N/A")
+        with trad_cols[1]:
+            st.metric("Temperature (mean)", f"{df_out['temperature'].mean():.2f} °C" if "temperature" in df_out.columns else "N/A")
+        with trad_cols[2]:
+            st.metric("SOC (last)", f"{df_out['soc'].iloc[-1]:.1f}%" if "soc" in df_out.columns else "N/A")
+
+        st.markdown("---")
+        st.subheader("Combined Recommendation")
+
+        if high_alerts or avg_score < 60:
+            st.error("Immediate action required.")
+        elif avg_score < 75:
+            st.warning("Monitor closely.")
+        else:
+            st.success("Pack healthy.")
+
+    ############################
+    # DATA TAB
+    ############################
+    with tab_table:
+        st.header("Processed Data & Export")
+        st.download_button("⬇️ Download full report CSV", df_out.to_csv(index=False).encode("utf-8"), "CellGuardAI_FullReport.csv", "text/csv")
+        st.dataframe(df_out.head(500), use_container_width=True)
+
+    st.caption("CellGuard.AI — final package with scenario demos, fixed element IDs, and PDF export.")
+
+if __name__ == "__main__":
+    main()
